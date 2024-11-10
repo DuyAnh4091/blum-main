@@ -6,25 +6,19 @@ import utc from "dayjs/plugin/utc.js";
 import delayHelper from "../helpers/delay.js";
 import generatorHelper from "../helpers/generator.js";
 import authService from "./auth.js";
-import { spawn } from 'child_process';
+import { Blum } from './blum_worker.js';
+
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
 class GameService {
   constructor() {
-    // Xóa bỏ API_KEY và REMAINING_QUOTA
-    // this.API_KEY = "";
-    // this.REMAINING_QUOTA = 99999;
+    this.initializeBlum();
   }
 
-  // Xóa bỏ hàm setApiKey và setQuota
-  // setApiKey(apiKey) {
-  //   this.API_KEY = apiKey;
-  // }
-
-  // setQuota(quota) {
-  //   this.REMAINING_QUOTA = quota;
-  // }
+  async initializeBlum() {
+    await Blum.init();
+  }
 
   async playGame(user, lang, delay) {
     try {
@@ -50,26 +44,15 @@ class GameService {
     }
   }
 
-  async claimGame(user, lang, gameId, eligibleDogs) {
-    const randomPoints = user?.database?.randomPoints || [150, 190];
-    let points = generatorHelper.randomInt(randomPoints[0], randomPoints[1]);
-    let dogs = 0;
-    if (eligibleDogs) {
-      points = generatorHelper.randomInt(150, 180);
-      dogs = generatorHelper.randomInt(7, 14) * 0.1;
-    }
-    const payload = await this.createPlayload(user, lang, gameId, points, dogs);
-
-    if (!payload) return;
-
+  async claimGame(user, lang, gameId, payload) {
     const body = { payload };
     try {
       const { data } = await user.http.post(5, "game/claim", body);
       if (data) {
         user.log.log(
           `${lang?.game?.claim_success}: ${colors.green(
-            points + user.currency
-          )}${eligibleDogs ? ` - ${dogs} 🦴` : ""}`
+            payload.BP.amount + user.currency
+          )}`
         );
         return true;
       } else {
@@ -82,27 +65,82 @@ class GameService {
       return false;
     }
   }
-  async createPayload(gameId, points, dogs) {
-    return new Promise((resolve, reject) => {
-      const process = spawn('node', ['./blum.mjs', gameId, points.toString(), dogs.toString()]);
-  
-      let output = '';
-      process.stdout.on('data', (data) => {
-        output += data.toString();
-      });
-  
-      process.stderr.on('data', (data) => {
-        console.error(`Error: ${data}`);
-      });
-  
-      process.on('close', (code) => {
-        if (code === 0) {
-          resolve(output.trim());
-        } else {
-          reject(new Error(`Process exited with code: ${code}`));
+
+  async eligibilityDogs(user) {
+    try {
+      const { data } = await user.http.get(5, "game/eligibility/dogs_drop");
+      return data.eligible;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async handleGame(user, lang, playPasses, timePlayGame) {
+    const isInTimeRange = this.checkTimePlayGame(timePlayGame);
+    if (isInTimeRange) {
+      const profile = await authService.getProfile(user, lang);
+      if (profile) playPasses = profile?.playPasses;
+      const eligibleDogs = await this.eligibilityDogs(user);
+      let gameCount = playPasses || 0;
+      let errorCount = 0;
+
+      while (gameCount > 0) {
+        if (errorCount > 3) {
+          gameCount = 0;
+          continue;
         }
-      });
-    });
+
+        await delayHelper.delay(2);
+        const delay = 30 + generatorHelper.randomInt(5, 10);
+        const gameId = await this.playGame(user, lang, delay);
+        if (gameId === 2) {
+          gameCount = 0;
+          continue;
+        }
+        if (gameId) {
+          errorCount = 0;
+
+          // Lấy challenge từ Blum
+          const challenge = await Blum.getChallenge(gameId);
+          const uuidChallenge = Blum.getUUID();
+
+          // Tạo payload
+          const payload = await Blum.getPayload(
+            gameId,
+            {
+              id: uuidChallenge,
+              nonce: challenge.nonce,
+              hash: challenge.hash,
+            },
+            {
+              BP: {
+                amount: generatorHelper.randomInt(150, 190), // Hoặc một giá trị khác nếu cần
+              }
+            },
+            {
+              CLOVER: {
+                clicks: 0 // Điều chỉnh nếu cần
+              },
+              FREEZE: {
+                clicks: 0 // Điều chỉnh nếu cần
+              },
+              BOMB: {
+                clicks: 0 // Điều chỉnh nếu cần
+              }
+            }
+          );
+
+          // Gọi claimGame với payload đã tạo
+          const statusClaim = await this.claimGame(user, lang, gameId, payload);
+          if (!statusClaim) {
+            errorCount++;
+          }
+          if (statusClaim) gameCount--;
+        } else {
+            errorCount++;
+          }
+      }
+    }
   }
 
   async eligibilityDogs(user) {

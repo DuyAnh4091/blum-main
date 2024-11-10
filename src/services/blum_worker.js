@@ -597,15 +597,23 @@ ${e.stack}` : r
         return (ue === "x" ? Yi : Yi & 3 | 8).toString(16)
     });
 
-    export const Blum = {
-        getUUID: null,
-        getChallenge: null,
-        getPayload: null,
-        init: async function() {
-            await q();
-            this.getChallenge = D;
-            this.getPayload = F;
-            this.getUUID = uuid;
-        }
-    };
-    await Blum.init();
+// blum_worker.js
+
+let getChallenge = null;
+let getUUID = null;
+let getPayload = null;
+
+const Blum = {
+    getUUID: null,
+    getChallenge: null,
+    getPayload: null,
+    init: async function() {
+        await q();
+        this.getChallenge = D; // Kiểm tra xem D có phải là một hàm không
+        this.getPayload = F;    // Kiểm tra xem F có phải là một hàm không
+        this.getUUID = uuid;     // Kiểm tra xem uuid có phải là một hàm không
+    }
+};
+
+// Xuất đối tượng Blum và các hàm
+export { Blum, getChallenge, getUUID, getPayload };

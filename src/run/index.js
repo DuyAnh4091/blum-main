@@ -9,7 +9,6 @@ import dailyService from "../services/daily.js";
 import farmingClass from "../services/farming.js";
 import gameService from "../services/game.js";
 import inviteClass from "../services/invite.js";
-import keyService from "../services/key.js";
 import server from "../services/server.js";
 import taskService from "../services/task.js";
 import tribeService from "../services/tribe.js";
@@ -176,8 +175,6 @@ console.log("");
 await server.showNoti(lang);
 console.log("");
 const users = await userService.loadUser(lang);
-
-await keyService.handleApiKey(lang);
 
 for (const [index, user] of users.entries()) {
   countdownList.push({
